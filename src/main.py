@@ -5,7 +5,8 @@ from fastapi.responses import Response
 import numpy as np
 from functools import cache
 from PIL import Image, UnidentifiedImageError
-from src.predictor import GunDetector, Detection, Segmentation, annotate_detection, annotate_segmentation
+from src.predictor import GunDetector, Detection, Segmentation, annotate_detection, annotate_segmentation, match_gun_bbox
+from src.models import Gun, PixelLocation, GunType, Person, PersonType
 from src.config import get_settings
 
 SETTINGS = get_settings()
@@ -58,6 +59,52 @@ def detect_guns(
     return results
 
 
+@app.post("/detect_people")
+def detect_people(
+    threshold: float = 0.5,
+    max_distance: int = 10,
+    file: UploadFile = File(...),
+    detector: GunDetector = Depends(get_gun_detector),
+) -> Segmentation:
+    """Retorna la segmentación de personas etiquetadas como 'safe' o 'danger'."""
+    _, img = detect_uploadfile(detector, file, threshold)
+    segmentation = detector.segment_people(img, threshold, max_distance=max_distance)
+    return segmentation
+
+
+@app.post("/detect")
+def detect_both(
+    threshold: float = 0.5,
+    max_distance: int = 10,
+    file: UploadFile = File(...),
+    detector: GunDetector = Depends(get_gun_detector),
+) -> dict:
+    """Retorna un diccionario con la detección de armas y la segmentación de personas."""
+    detection, img = detect_uploadfile(detector, file, threshold)
+    segmentation = detector.segment_people(img, threshold, max_distance=max_distance)
+    return {"detection": detection, "segmentation": segmentation}
+
+
+@app.post("/annotate_people")
+def annotate_people(
+    threshold: float = 0.5,
+    max_distance: int = 10,
+    draw_boxes: bool = True,
+    file: UploadFile = File(...),
+    detector: GunDetector = Depends(get_gun_detector),
+) -> Response:
+    """Retorna una imagen con anotaciones de segmentación."""
+    _, img = detect_uploadfile(detector, file, threshold)
+    segmentation = detector.segment_people(img, threshold, max_distance=max_distance)
+    annotated_img = annotate_segmentation(img, segmentation, draw_boxes=draw_boxes)
+    img_rgb = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
+    img_pil = Image.fromarray(img_rgb)
+    image_stream = io.BytesIO()
+    img_pil.save(image_stream, format="JPEG")
+    image_stream.seek(0)
+    return Response(content=image_stream.read(), media_type="image/jpeg")
+
+
 @app.post("/annotate_guns")
 def annotate_guns(
     threshold: float = 0.5,
@@ -73,6 +120,138 @@ def annotate_guns(
     image_stream.seek(0)
     return Response(content=image_stream.read(), media_type="image/jpeg")
 
+
+@app.post("/annotate")
+def annotate(
+    threshold: float = 0.5,
+    max_distance: int = 10,
+    draw_boxes: bool = True,
+    file: UploadFile = File(...),
+    detector: GunDetector = Depends(get_gun_detector),
+) -> Response:
+    """Anota ambas detecciones (armas) y segmentaciones (personas) en la misma imagen."""
+    detection, img = detect_uploadfile(detector, file, threshold)
+    segmentation = detector.segment_people(img, threshold, max_distance=max_distance)
+    annotated = annotate_detection(img.copy(), detection)
+    annotated = annotate_segmentation(annotated, segmentation, draw_boxes=draw_boxes)
+    try:
+        annotated_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+    except Exception:
+        annotated_rgb = annotated
+    img_pil = Image.fromarray(annotated_rgb)
+    image_stream = io.BytesIO()
+    img_pil.save(image_stream, format="JPEG")
+    image_stream.seek(0)
+    return Response(content=image_stream.read(), media_type="image/jpeg")
+
+
+
+
+@app.get("/test_match_gun_bbox")
+def test_match(detector: GunDetector = Depends(get_gun_detector)):
+    segment = [[100, 100], [150, 100], [150, 150], [100, 150]]
+    bboxes = [
+        [200, 200, 250, 250],
+        [155, 120, 180, 140],
+    ]
+    result = match_gun_bbox(segment, bboxes, max_distance=20)
+    return {"matched_box": result}
+
+@app.post("/test-segment")
+async def test_segment_people(
+    file: UploadFile = File(...),
+    max_distance: int = 10,
+    detector: GunDetector = Depends(get_gun_detector),
+):
+    contents = await file.read()
+    np_arr = np.frombuffer(contents, np.uint8)
+    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    result = detector.segment_people(image, threshold=0.5, max_distance=max_distance)
+    return {
+        "n_detections": result.n_detections,
+        "labels": result.labels,
+        "boxes": result.boxes,
+    }
+
+
+@app.post("/guns")
+def get_guns(
+    threshold: float = 0.5,
+    file: UploadFile = File(...),
+    detector: GunDetector = Depends(get_gun_detector),
+) -> list[Gun]:
+    """Retorna una lista de armas con tipo y ubicación en píxeles."""
+    detection, _ = detect_uploadfile(detector, file, threshold)
+    guns: list[Gun] = []
+    for label, box in zip(detection.labels, detection.boxes):
+        try:
+            x1, y1, x2, y2 = [int(v) for v in box]
+        except Exception:
+            continue
+        cx = int((x1 + x2) / 2)
+        cy = int((y1 + y2) / 2)
+        try:
+            gun_type = GunType(label)
+        except Exception:
+            try:
+                gun_type = GunType(str(label).lower())
+            except Exception:
+                continue
+        guns.append(Gun(gun_type=gun_type, location=PixelLocation(x=cx, y=cy)))
+    return guns
+    
+
+@app.post("/people")
+def get_people(
+    threshold: float = 0.5,
+    max_distance: int = 10,
+    file: UploadFile = File(...),
+    detector: GunDetector = Depends(get_gun_detector),
+) -> list[Person]:
+    """Retorna una lista de personas con categoría, ubicación central y área en píxeles."""
+    _, img = detect_uploadfile(detector, file, threshold)
+    segmentation = detector.segment_people(img, threshold, max_distance=max_distance)
+
+    people: list[Person] = []
+    for idx, poly in enumerate(segmentation.polygons or []):
+        try:
+            pts = np.array(poly, dtype=np.int32)
+            if pts.ndim != 2 or pts.shape[0] < 3:
+                continue
+            cx = int(np.mean(pts[:, 0]))
+            cy = int(np.mean(pts[:, 1]))
+            area = int(abs(cv2.contourArea(pts)))
+            label = segmentation.labels[idx] if segmentation.labels and idx < len(segmentation.labels) else "safe"
+            try:
+                person_type = PersonType(label)
+            except Exception:
+                try:
+                    person_type = PersonType(str(label).lower())
+                except Exception:
+                    person_type = PersonType.safe
+            people.append(
+                Person(person_type=person_type, location=PixelLocation(x=cx, y=cy), area=area)
+            )
+        except Exception:
+            continue
+    return people
+    
+@app.post("/test-annotate-segment")
+async def annotate_segmented_people(
+    file: UploadFile = File(...),
+    draw_boxes: bool = True,
+    max_distance: int = 10,
+    detector: GunDetector = Depends(get_gun_detector),
+):
+    contents = await file.read()
+    np_arr = np.frombuffer(contents, np.uint8)
+    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    segmentation = detector.segment_people(image, threshold=0.5, max_distance=max_distance)
+    annotated = annotate_segmentation(image, segmentation, draw_boxes=draw_boxes)
+
+    _, buffer = cv2.imencode(".jpg", annotated)
+    return Response(content=buffer.tobytes(), media_type="image/jpeg")
+    
 
 if __name__ == "__main__":
     import uvicorn
