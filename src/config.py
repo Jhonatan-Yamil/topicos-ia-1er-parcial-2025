@@ -5,7 +5,7 @@ from functools import cache
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
 
-    api_name: str = "Gun Detection service"
+    api_name: str = "Gun Detection service | Jhonatan Cabezas (Más info en el readme de lo agregado extra)"
     revision: str = "local"
     od_model_path: str = "models/best.pt"
     seg_model_path: str = "yolo11n-seg.pt"

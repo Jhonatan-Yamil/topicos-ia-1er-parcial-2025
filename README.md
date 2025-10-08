@@ -1,6 +1,26 @@
 # topicos-ia-2024-1er-parcial
 
+## Integrantes
+- Jhonatan Cabezas - 70416
 
+Se logró cumplir correctamente con todas las tareas solicitadas en el parcial, además de agregar un endpoint extra para debuggear y verificar la correcta implementación del método match_gun_bbox, con parámetros fijos para verificar con mayor facilidad conociendo el resultado que debería retornar.
+
+people_gun_1.jpg -> imagen de prueba agregadada 
+![alt text](image.png)
+
+De esta imagen se tiene el siguiente resultado:
+![alt text](image-1.png)
+
+Donde se puede confirmar que se cumplió correctamente con todo lo requerido de manera correcta. Ya que se detecta el arma y mediante la distancia, etiqueta correctamente a la persona que lo esta agarrando como 'danger' y a las otras personas que estan lejos como 'safe'.
+### Aclaración
+
+El modelo como tal utilizado que es el yolo11n-seg.pt por lo general detecta bien las personas, pero en algunas ocasiones puede fallar y no detectar a una persona o detectarla mal. Capaz probando con otro modelo de Yolo funcionaria de mejor manera o modificando el threshold y otros parametros. 
+
+
+
+
+
+# Lo que antes estaba en el readme
 ## instrucciones
 
 ### Completar implementacion del detector

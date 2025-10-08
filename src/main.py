@@ -144,36 +144,6 @@ def annotate(
     image_stream.seek(0)
     return Response(content=image_stream.read(), media_type="image/jpeg")
 
-
-
-
-@app.get("/test_match_gun_bbox")
-def test_match(detector: GunDetector = Depends(get_gun_detector)):
-    segment = [[100, 100], [150, 100], [150, 150], [100, 150]]
-    bboxes = [
-        [200, 200, 250, 250],
-        [155, 120, 180, 140],
-    ]
-    result = match_gun_bbox(segment, bboxes, max_distance=20)
-    return {"matched_box": result}
-
-@app.post("/test-segment")
-async def test_segment_people(
-    file: UploadFile = File(...),
-    max_distance: int = 10,
-    detector: GunDetector = Depends(get_gun_detector),
-):
-    contents = await file.read()
-    np_arr = np.frombuffer(contents, np.uint8)
-    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    result = detector.segment_people(image, threshold=0.5, max_distance=max_distance)
-    return {
-        "n_detections": result.n_detections,
-        "labels": result.labels,
-        "boxes": result.boxes,
-    }
-
-
 @app.post("/guns")
 def get_guns(
     threshold: float = 0.5,
@@ -236,22 +206,17 @@ def get_people(
             continue
     return people
     
-@app.post("/test-annotate-segment")
-async def annotate_segmented_people(
-    file: UploadFile = File(...),
-    draw_boxes: bool = True,
-    max_distance: int = 10,
-    detector: GunDetector = Depends(get_gun_detector),
-):
-    contents = await file.read()
-    np_arr = np.frombuffer(contents, np.uint8)
-    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    segmentation = detector.segment_people(image, threshold=0.5, max_distance=max_distance)
-    annotated = annotate_segmentation(image, segmentation, draw_boxes=draw_boxes)
+# Es un metodo para probar solamente la funcion match_gun_bbox, como debugger
+@app.get("/test_match_gun_bbox")
+def test_match(detector: GunDetector = Depends(get_gun_detector)):
+    segment = [[100, 100], [150, 100], [150, 150], [100, 150]]
+    bboxes = [
+        [200, 200, 250, 250],
+        [155, 120, 180, 140],
+    ]
+    result = match_gun_bbox(segment, bboxes, max_distance=20)
+    return {"matched_box": result}
 
-    _, buffer = cv2.imencode(".jpg", annotated)
-    return Response(content=buffer.tobytes(), media_type="image/jpeg")
-    
 
 if __name__ == "__main__":
     import uvicorn
